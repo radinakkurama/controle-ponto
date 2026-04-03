@@ -40,10 +40,6 @@ HTML = """
             cursor: pointer;
         }
 
-        input[type="file"] {
-            margin-bottom: 10px;
-        }
-
         .resultado {
             margin-top: 20px;
             text-align: left;
@@ -57,7 +53,7 @@ HTML = """
     <h2>📊 Controle de Ponto</h2>
 
     <form id="form">
-        <input type="file" name="file" required><br>
+        <input type="file" name="file" required><br><br>
 
         <label><input type="checkbox" id="faltas" checked> Faltas</label>
         <label><input type="checkbox" id="afast" checked> Afastamentos</label>
@@ -111,7 +107,7 @@ document.getElementById("form").onsubmit = async function(e){
 
         document.getElementById("resultado").innerText = texto;
     } else {
-        document.getElementById("status").innerText = "❌ Erro: " + d.erro;
+        document.getElementById("status").innerText = "❌ Erro";
     }
 }
 </script>
@@ -128,7 +124,7 @@ def analisar_pdf(filepath):
         for pagina in pdf.pages:
             texto = pagina.extract_text() or ""
 
-            for linha in texto.split("\\n"):
+            for linha in texto.split("\n"):
                 linha_lower = linha.lower()
 
                 if "associado" in linha_lower:
@@ -143,7 +139,7 @@ def analisar_pdf(filepath):
                 if not associado_atual:
                     continue
 
-                data_match = re.search(r"\\d{2}/\\d{2}/\\d{2}", linha)
+                data_match = re.search(r"\d{2}/\d{2}/\d{2}", linha)
                 if not data_match:
                     continue
 
