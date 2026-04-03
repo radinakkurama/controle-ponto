@@ -1,8 +1,6 @@
-from flask import Flask, request, render_template_string, send_file
+from flask import Flask, request, render_template_string
 import fitz  # PyMuPDF
 import re
-import pandas as pd
-from io import BytesIO
 import threading
 import uuid
 
@@ -32,12 +30,6 @@ HTML = """
 
         <button type="submit">Analisar</button>
     </form>
-
-    {% if session_id %}
-        <p>⏳ Processando arquivo...</p>
-        <a href="/resultado/{{session_id}}">Ver resultado</a>
-    {% endif %}
-
 </div>
 </body>
 </html>
@@ -48,6 +40,15 @@ RESULTADO_HTML = """
 <html>
 <head>
     <title>Resultado</title>
+
+    {% if not pronto %}
+    <script>
+        setTimeout(function(){
+            window.location.reload();
+        }, 2000);
+    </script>
+    {% endif %}
+
 </head>
 <body style="font-family: Arial; text-align:center; background:#f4f4f4">
 
@@ -56,13 +57,10 @@ RESULTADO_HTML = """
 <h2>Resultado</h2>
 
 {% if pronto %}
+    <p style="color:green;"><strong>✅ Processamento concluído!</strong></p>
     <pre>{{ resultado }}</pre>
-
-    <form method="POST" action="/exportar/{{session_id}}">
-        <button type="submit">📊 Exportar Excel</button>
-    </form>
 {% else %}
-    <p>⏳ Ainda processando... atualize a página</p>
+    <p>⏳ Processando arquivo... aguarde</p>
 {% endif %}
 
 </div>
@@ -82,7 +80,7 @@ def analisar_pdf_bytes(file_bytes):
         if not texto:
             continue
 
-        linhas = texto.split("\n")
+        linhas = texto.split("\\n")
 
         for linha in linhas:
             linha_lower = linha.lower()
@@ -102,7 +100,7 @@ def analisar_pdf_bytes(file_bytes):
             if not associado_atual:
                 continue
 
-            data_match = re.search(r"\d{2}/\d{2}/\d{2}", linha)
+            data_match = re.search(r"\\d{2}/\\d{2}/\\d{2}", linha)
             if not data_match:
                 continue
 
@@ -137,24 +135,23 @@ def processar_background(file_bytes, session_id):
         if not faltas and not afast:
             continue
 
-        resultado += f"👤 {nome}\n\n"
+        resultado += f"👤 {nome}\\n\\n"
 
         if mostrar_faltas:
-            resultado += f"❌ Faltas: {len(faltas)}\n"
+            resultado += f"❌ Faltas: {len(faltas)}\\n"
             for d in sorted(faltas):
-                resultado += f"• {d}\n"
+                resultado += f"• {d}\\n"
 
         if mostrar_afast:
-            resultado += f"\n🏥 Afastamentos: {len(afast)}\n"
+            resultado += f"\\n🏥 Afastamentos: {len(afast)}\\n"
             for d in sorted(afast):
-                resultado += f"• {d}\n"
+                resultado += f"• {d}\\n"
 
-        resultado += "\n" + "-"*40 + "\n\n"
+        resultado += "\\n" + "-"*40 + "\\n\\n"
 
     resultados[session_id] = {
         "pronto": True,
-        "texto": resultado,
-        "dados": dados
+        "texto": resultado
     }
 
 
@@ -181,7 +178,7 @@ def home():
                 args=(file_bytes, session_id)
             ).start()
 
-            return render_template_string(HTML, session_id=session_id)
+            return render_template_string(RESULTADO_HTML, pronto=False, session_id=session_id)
 
     return render_template_string(HTML)
 
@@ -199,35 +196,6 @@ def resultado(session_id):
         resultado=info.get("texto", ""),
         session_id=session_id
     )
-
-
-@app.route("/exportar/<session_id>", methods=["POST"])
-def exportar(session_id):
-    info = resultados.get(session_id)
-
-    if not info or not info["pronto"]:
-        return "Ainda processando"
-
-    dados = info["dados"]
-
-    output = BytesIO()
-    lista = []
-
-    for nome, info in dados.items():
-        for d in info["faltas"]:
-            lista.append([nome, "Falta Injustificada", d])
-
-        for d in info["afastamentos"]:
-            lista.append([nome, "Afastamento", d])
-
-    df = pd.DataFrame(lista, columns=["Associado", "Tipo", "Data"])
-
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False)
-
-    output.seek(0)
-
-    return send_file(output, download_name="relatorio.xlsx", as_attachment=True)
 
 
 if __name__ == "__main__":
