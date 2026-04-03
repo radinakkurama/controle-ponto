@@ -19,64 +19,14 @@ HTML = """
 
 <h2>📊 Controle de Ponto</h2>
 
-<form id="form">
+<form method="POST" action="/upload" enctype="multipart/form-data">
     <input type="file" name="file" required><br><br>
-
-    <label><input type="checkbox" id="faltas" checked> Faltas</label>
-    <label><input type="checkbox" id="afast" checked> Afastamentos</label>
-
-    <br><br>
     <button type="submit">Analisar</button>
 </form>
 
-<p id="status"></p>
-<pre id="resultado" style="text-align:left; margin:20px;"></pre>
-
-<script>
-document.getElementById("form").onsubmit = async function(e){
-    e.preventDefault();
-
-    let formData = new FormData(this);
-
-    document.getElementById("status").innerText = "⏳ Processando...";
-    document.getElementById("resultado").innerText = "";
-
-    let res = await fetch("/upload", { method:"POST", body: formData });
-    let d = await res.json();
-
-    if(d.status === "done"){
-        document.getElementById("status").innerText = "✅ Concluído";
-
-        let mostrarFaltas = document.getElementById("faltas").checked;
-        let mostrarAfast = document.getElementById("afast").checked;
-
-        let texto = "";
-
-        d.dados.forEach(p => {
-
-            if (!p.faltas.length && !p.afastamentos.length) return;
-
-            texto += "👤 " + p.nome + "\\n\\n";
-
-            if (mostrarFaltas){
-                texto += "❌ Faltas: " + p.faltas.length + "\\n";
-                p.faltas.forEach(f => texto += "• " + f + "\\n");
-            }
-
-            if (mostrarAfast){
-                texto += "\\n🏥 Afastamentos: " + p.afastamentos.length + "\\n";
-                p.afastamentos.forEach(a => texto += "• " + a + "\\n");
-            }
-
-            texto += "\\n------------------------\\n\\n";
-        });
-
-        document.getElementById("resultado").innerText = texto;
-    } else {
-        document.getElementById("status").innerText = "❌ Erro: " + d.erro;
-    }
-}
-</script>
+<pre style="text-align:left; margin:20px;">
+{{ resultado }}
+</pre>
 
 </body>
 </html>
@@ -106,40 +56,46 @@ def analisar_pdf(filepath):
                 if not associado_atual:
                     continue
 
-                # CAPTURA DATA
+                # PEGA DATA
                 data_match = re.search(r"\\d{2}/\\d{2}/\\d{2}", linha)
                 if not data_match:
                     continue
 
                 data = data_match.group()
 
-                # 🔥 CORREÇÃO INTELIGENTE
-                if "falta" in linha_lower and "injust" in linha_lower:
+                # 🔥 VOLTA PARA PADRÃO ORIGINAL (FUNCIONAVA)
+                if "falta injustificada" in linha_lower:
                     if data not in dados[associado_atual]["faltas"]:
                         dados[associado_atual]["faltas"].append(data)
 
-                if "afast" in linha_lower and ("doenca" in linha_lower or "doença" in linha_lower):
+                if "afast doenca" in linha_lower:
                     if data not in dados[associado_atual]["afastamentos"]:
                         dados[associado_atual]["afastamentos"].append(data)
 
-    resultado = []
+    resultado = ""
 
     for nome, info in dados.items():
         if not info["faltas"] and not info["afastamentos"]:
             continue
 
-        resultado.append({
-            "nome": nome,
-            "faltas": info["faltas"],
-            "afastamentos": info["afastamentos"]
-        })
+        resultado += f"👤 {nome}\\n\\n"
+
+        resultado += f"❌ Faltas injustificadas: {len(info['faltas'])}\\n"
+        for f in info["faltas"]:
+            resultado += f"- {f}\\n"
+
+        resultado += f"\\n🏥 Afastamentos: {len(info['afastamentos'])}\\n"
+        for a in info["afastamentos"]:
+            resultado += f"- {a}\\n"
+
+        resultado += "\\n------------------------\\n\\n"
 
     return resultado
 
 
-@app.route("/")
+@app.route("/", methods=["GET"])
 def home():
-    return render_template_string(HTML)
+    return render_template_string(HTML, resultado="")
 
 
 @app.route("/upload", methods=["POST"])
@@ -149,19 +105,10 @@ def upload():
     filepath = os.path.join(UPLOAD_FOLDER, f"{uuid.uuid4()}.pdf")
     file.save(filepath)
 
-    try:
-        resultado = analisar_pdf(filepath)
-        return jsonify({
-            "status": "done",
-            "dados": resultado
-        })
-    except Exception as e:
-        return jsonify({
-            "status": "erro",
-            "erro": str(e)
-        })
+    resultado = analisar_pdf(filepath)
+
+    return render_template_string(HTML, resultado=resultado)
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(debug=True)
