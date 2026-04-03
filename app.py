@@ -73,7 +73,7 @@ document.getElementById("form").onsubmit = async function(e){
 
         document.getElementById("resultado").innerText = texto;
     } else {
-        document.getElementById("status").innerText = "❌ Erro";
+        document.getElementById("status").innerText = "❌ Erro: " + d.erro;
     }
 }
 </script>
@@ -93,6 +93,7 @@ def analisar_pdf(filepath):
             for linha in texto.split("\\n"):
                 linha_lower = linha.lower()
 
+                # IDENTIFICA ASSOCIADO
                 if "associado" in linha_lower:
                     partes = linha.split(":")
                     if len(partes) > 1:
@@ -105,17 +106,19 @@ def analisar_pdf(filepath):
                 if not associado_atual:
                     continue
 
+                # CAPTURA DATA
                 data_match = re.search(r"\\d{2}/\\d{2}/\\d{2}", linha)
                 if not data_match:
                     continue
 
                 data = data_match.group()
 
-                if "falta injustificada" in linha_lower:
+                # 🔥 CORREÇÃO INTELIGENTE
+                if "falta" in linha_lower and "injust" in linha_lower:
                     if data not in dados[associado_atual]["faltas"]:
                         dados[associado_atual]["faltas"].append(data)
 
-                if "afast doenca" in linha_lower:
+                if "afast" in linha_lower and ("doenca" in linha_lower or "doença" in linha_lower):
                     if data not in dados[associado_atual]["afastamentos"]:
                         dados[associado_atual]["afastamentos"].append(data)
 
