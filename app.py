@@ -15,10 +15,11 @@ HTML = """
     <title>Controle de Ponto</title>
     <style>
         body { font-family: Arial; background: #f4f4f4; text-align: center; }
-        .box { background: white; padding: 20px; margin: 40px auto; width: 700px; border-radius: 10px; box-shadow: 0px 0px 10px #ccc; }
+        .box { background: white; padding: 20px; margin: 40px auto; width: 750px; border-radius: 10px; box-shadow: 0px 0px 10px #ccc; }
         button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
         button:hover { background: #0056b3; }
         pre { text-align: left; background: #eee; padding: 10px; border-radius: 5px; }
+        .filtros { margin: 10px; }
     </style>
 </head>
 <body>
@@ -28,6 +29,12 @@ HTML = """
 
     <form method="POST" enctype="multipart/form-data">
         <input type="file" name="file"><br><br>
+
+        <div class="filtros">
+            <label><input type="checkbox" name="mostrar_faltas" checked> Mostrar Faltas</label><br>
+            <label><input type="checkbox" name="mostrar_afastamentos" checked> Mostrar Afastamentos</label>
+        </div>
+
         <button type="submit">Analisar</button>
     </form>
 
@@ -52,8 +59,11 @@ def analisar_pdf(file):
 
     with pdfplumber.open(file) as pdf:
         for pagina in pdf.pages:
-            texto = pagina.extract_text()
-            if not texto:
+            try:
+                texto = pagina.extract_text()
+                if not texto:
+                    continue
+            except:
                 continue
 
             linhas = texto.split("\n")
@@ -66,10 +76,11 @@ def analisar_pdf(file):
                     if len(partes) > 1:
                         nome_limpo = partes[1].split("Categoria")[0].strip()
                         associado_atual = nome_limpo
-                        dados[associado_atual] = {
-                            "faltas": set(),
-                            "afastamentos": set()
-                        }
+                        if associado_atual not in dados:
+                            dados[associado_atual] = {
+                                "faltas": set(),
+                                "afastamentos": set()
+                            }
 
                 if not associado_atual:
                     continue
@@ -86,6 +97,7 @@ def analisar_pdf(file):
                 if "falta injustificada" in linha_lower:
                     dados[associado_atual]["faltas"].add(data)
 
+    # converter set para list
     for nome in dados:
         dados[nome]["faltas"] = list(dados[nome]["faltas"])
         dados[nome]["afastamentos"] = list(dados[nome]["afastamentos"])
@@ -108,23 +120,35 @@ def home():
             if file.filename == "":
                 return "Erro: selecione um PDF"
 
+            # 🔥 evita erro com PDF grande
+            file.stream.seek(0)
+
             dados = analisar_pdf(file)
+
+            mostrar_faltas = request.form.get("mostrar_faltas")
+            mostrar_afastamentos = request.form.get("mostrar_afastamentos")
 
             resultado = ""
 
             for nome, info in dados.items():
-                if not info["faltas"] and not info["afastamentos"]:
+
+                faltas = info["faltas"] if mostrar_faltas else []
+                afast = info["afastamentos"] if mostrar_afastamentos else []
+
+                if not faltas and not afast:
                     continue
 
                 resultado += f"👤 {nome}\n\n"
 
-                resultado += f"❌ Faltas: {len(info['faltas'])}\n"
-                for d in sorted(info["faltas"]):
-                    resultado += f"• {d}\n"
+                if mostrar_faltas:
+                    resultado += f"❌ Faltas: {len(faltas)}\n"
+                    for d in sorted(faltas):
+                        resultado += f"• {d}\n"
 
-                resultado += f"\n🏥 Afastamentos: {len(info['afastamentos'])}\n"
-                for d in sorted(info["afastamentos"]):
-                    resultado += f"• {d}\n"
+                if mostrar_afastamentos:
+                    resultado += f"\n🏥 Afastamentos: {len(afast)}\n"
+                    for d in sorted(afast):
+                        resultado += f"• {d}\n"
 
                 resultado += "\n" + "-"*40 + "\n\n"
 
