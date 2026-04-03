@@ -1,13 +1,10 @@
 from flask import Flask, request, jsonify, render_template_string
 import pdfplumber
 import re
-import threading
 import uuid
 import os
 
 app = Flask(__name__)
-
-processos = {}
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -29,7 +26,7 @@ HTML = """
             background: white;
             padding: 30px;
             border-radius: 12px;
-            width: 400px;
+            width: 420px;
             margin: auto;
             box-shadow: 0 10px 30px rgba(0,0,0,0.2);
         }
@@ -41,6 +38,10 @@ HTML = """
             color: white;
             border-radius: 6px;
             cursor: pointer;
+        }
+
+        input[type="file"] {
+            margin-bottom: 10px;
         }
 
         .resultado {
@@ -56,7 +57,7 @@ HTML = """
     <h2>📊 Controle de Ponto</h2>
 
     <form id="form">
-        <input type="file" name="file"><br><br>
+        <input type="file" name="file" required><br>
 
         <label><input type="checkbox" id="faltas" checked> Faltas</label>
         <label><input type="checkbox" id="afast" checked> Afastamentos</label>
@@ -79,46 +80,39 @@ document.getElementById("form").onsubmit = async function(e){
     document.getElementById("resultado").innerText = "";
 
     let res = await fetch("/upload", { method:"POST", body: formData });
-    let data = await res.json();
+    let d = await res.json();
 
-    let id = data.id;
+    if(d.status === "done"){
+        document.getElementById("status").innerText = "✅ Concluído";
 
-    let intervalo = setInterval(async () => {
-        let r = await fetch("/status/" + id);
-        let d = await r.json();
+        let mostrarFaltas = document.getElementById("faltas").checked;
+        let mostrarAfast = document.getElementById("afast").checked;
 
-        if(d.status === "done"){
-            clearInterval(intervalo);
+        let texto = "";
 
-            document.getElementById("status").innerText = "✅ Concluído";
+        d.dados.forEach(p => {
 
-            let mostrarFaltas = document.getElementById("faltas").checked;
-            let mostrarAfast = document.getElementById("afast").checked;
+            if (!p.faltas.length && !p.afastamentos.length) return;
 
-            let texto = "";
+            texto += "👤 " + p.nome + "\\n\\n";
 
-            d.dados.forEach(p => {
+            if (mostrarFaltas){
+                texto += "❌ Faltas: " + p.faltas.length + "\\n";
+                p.faltas.forEach(f => texto += "• " + f + "\\n");
+            }
 
-                if (!p.faltas.length && !p.afastamentos.length) return;
+            if (mostrarAfast){
+                texto += "\\n🏥 Afastamentos: " + p.afastamentos.length + "\\n";
+                p.afastamentos.forEach(a => texto += "• " + a + "\\n");
+            }
 
-                texto += "👤 " + p.nome + "\\n\\n";
+            texto += "\\n------------------------\\n\\n";
+        });
 
-                if (mostrarFaltas){
-                    texto += "❌ Faltas: " + p.faltas.length + "\\n";
-                    p.faltas.forEach(f => texto += "• " + f + "\\n");
-                }
-
-                if (mostrarAfast){
-                    texto += "\\n🏥 Afastamentos: " + p.afastamentos.length + "\\n";
-                    p.afastamentos.forEach(a => texto += "• " + a + "\\n");
-                }
-
-                texto += "\\n------------------------\\n\\n";
-            });
-
-            document.getElementById("resultado").innerText = texto;
-        }
-    }, 2000);
+        document.getElementById("resultado").innerText = texto;
+    } else {
+        document.getElementById("status").innerText = "❌ Erro: " + d.erro;
+    }
 }
 </script>
 
@@ -178,14 +172,6 @@ def analisar_pdf(filepath):
     return resultado
 
 
-def processar_em_background(filepath, job_id):
-    try:
-        resultado = analisar_pdf(filepath)
-        processos[job_id] = {"status": "done", "dados": resultado}
-    except Exception as e:
-        processos[job_id] = {"status": "erro", "dados": str(e)}
-
-
 @app.route("/")
 def home():
     return render_template_string(HTML)
@@ -195,25 +181,20 @@ def home():
 def upload():
     file = request.files["file"]
 
-    job_id = str(uuid.uuid4())
-    filepath = os.path.join(UPLOAD_FOLDER, f"{job_id}.pdf")
-
+    filepath = os.path.join(UPLOAD_FOLDER, f"{uuid.uuid4()}.pdf")
     file.save(filepath)
 
-    processos[job_id] = {"status": "processing"}
-
-    thread = threading.Thread(
-        target=processar_em_background,
-        args=(filepath, job_id)
-    )
-    thread.start()
-
-    return jsonify({"id": job_id})
-
-
-@app.route("/status/<job_id>")
-def status(job_id):
-    return jsonify(processos.get(job_id, {"status": "not_found"}))
+    try:
+        resultado = analisar_pdf(filepath)
+        return jsonify({
+            "status": "done",
+            "dados": resultado
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "erro",
+            "erro": str(e)
+        })
 
 
 if __name__ == "__main__":
