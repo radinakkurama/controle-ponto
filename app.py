@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template_string, send_file, redirect
+from flask import Flask, request, render_template_string, send_file
 import fitz  # PyMuPDF
 import re
 import pandas as pd
@@ -9,7 +9,6 @@ import uuid
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20MB
 
-# armazenamento simples (em memória)
 resultados = {}
 
 HTML = """
@@ -25,6 +24,12 @@ HTML = """
 
     <form method="POST" enctype="multipart/form-data">
         <input type="file" name="file"><br><br>
+
+        <div style="margin:10px;">
+            <label><input type="checkbox" name="mostrar_faltas" checked> Mostrar Faltas</label><br>
+            <label><input type="checkbox" name="mostrar_afastamentos" checked> Mostrar Afastamentos</label>
+        </div>
+
         <button type="submit">Analisar</button>
     </form>
 
@@ -51,6 +56,8 @@ RESULTADO_HTML = """
 <h2>Resultado</h2>
 
 {% if pronto %}
+    <p style="color:green;"><strong>✅ Processamento concluído!</strong></p>
+
     <pre>{{ resultado }}</pre>
 
     <form method="POST" action="/exportar/{{session_id}}">
@@ -65,7 +72,6 @@ RESULTADO_HTML = """
 </html>
 """
 
-# 🔥 NOVO ANALISADOR (super rápido)
 def analisar_pdf_bytes(file_bytes):
     dados = {}
     associado_atual = None
@@ -78,7 +84,7 @@ def analisar_pdf_bytes(file_bytes):
         if not texto:
             continue
 
-        linhas = texto.split("\n")
+        linhas = texto.split("\\n")
 
         for linha in linhas:
             linha_lower = linha.lower()
@@ -98,7 +104,7 @@ def analisar_pdf_bytes(file_bytes):
             if not associado_atual:
                 continue
 
-            data_match = re.search(r"\d{2}/\d{2}/\d{2}", linha)
+            data_match = re.search(r"\\d{2}/\\d{2}/\\d{2}", linha)
             if not data_match:
                 continue
 
@@ -117,30 +123,35 @@ def analisar_pdf_bytes(file_bytes):
     return dados
 
 
-# 🔄 processamento em background
 def processar_background(file_bytes, session_id):
     dados = analisar_pdf_bytes(file_bytes)
+
+    config = resultados.get(session_id, {})
+    mostrar_faltas = config.get("mostrar_faltas", True)
+    mostrar_afast = config.get("mostrar_afastamentos", True)
 
     resultado = ""
 
     for nome, info in dados.items():
-        faltas = info["faltas"]
-        afast = info["afastamentos"]
+        faltas = info["faltas"] if mostrar_faltas else []
+        afast = info["afastamentos"] if mostrar_afast else []
 
         if not faltas and not afast:
             continue
 
-        resultado += f"👤 {nome}\n\n"
+        resultado += f"👤 {nome}\\n\\n"
 
-        resultado += f"❌ Faltas: {len(faltas)}\n"
-        for d in sorted(faltas):
-            resultado += f"• {d}\n"
+        if mostrar_faltas:
+            resultado += f"❌ Faltas: {len(faltas)}\\n"
+            for d in sorted(faltas):
+                resultado += f"• {d}\\n"
 
-        resultado += f"\n🏥 Afastamentos: {len(afast)}\n"
-        for d in sorted(afast):
-            resultado += f"• {d}\n"
+        if mostrar_afast:
+            resultado += f"\\n🏥 Afastamentos: {len(afast)}\\n"
+            for d in sorted(afast):
+                resultado += f"• {d}\\n"
 
-        resultado += "\n" + "-"*40 + "\n\n"
+        resultado += "\\n" + "-"*40 + "\\n\\n"
 
     resultados[session_id] = {
         "pronto": True,
@@ -154,12 +165,18 @@ def home():
     if request.method == "POST":
         file = request.files["file"]
 
+        mostrar_faltas = request.form.get("mostrar_faltas")
+        mostrar_afastamentos = request.form.get("mostrar_afastamentos")
+
         if file:
             session_id = str(uuid.uuid4())
-
             file_bytes = file.read()
 
-            resultados[session_id] = {"pronto": False}
+            resultados[session_id] = {
+                "pronto": False,
+                "mostrar_faltas": bool(mostrar_faltas),
+                "mostrar_afastamentos": bool(mostrar_afastamentos)
+            }
 
             threading.Thread(
                 target=processar_background,
