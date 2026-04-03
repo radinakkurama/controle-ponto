@@ -1,95 +1,114 @@
-from flask import Flask, request, render_template_string, send_file
-import pdfplumber
+from flask import Flask, request, render_template_string, send_file, redirect
+import fitz  # PyMuPDF
 import re
 import pandas as pd
 from io import BytesIO
-import json
-import webbrowser
 import threading
+import uuid
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20MB
+
+# armazenamento simples (em memória)
+resultados = {}
 
 HTML = """
 <!DOCTYPE html>
 <html>
 <head>
     <title>CONTROLE DE PONTO</title>
-    <style>
-        body { font-family: Arial; background: #f4f4f4; text-align: center; }
-        .box { background: white; padding: 20px; margin: 40px auto; width: 700px; border-radius: 10px; box-shadow: 0px 0px 10px #ccc; }
-        button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
-        button:hover { background: #0056b3; }
-        pre { text-align: left; background: #eee; padding: 10px; border-radius: 5px; }
-        .filtros { margin: 10px; }
-    </style>
 </head>
-<body>
+<body style="font-family: Arial; text-align:center; background:#f4f4f4">
 
-<div class="box">
+<div style="background:white; padding:20px; margin:40px auto; width:700px; border-radius:10px;">
     <h2>📄 CONTROLE DE PONTO</h2>
 
     <form method="POST" enctype="multipart/form-data">
         <input type="file" name="file"><br><br>
-
-        <div class="filtros">
-            <label><input type="checkbox" name="mostrar_faltas" checked> Mostrar Faltas</label><br>
-            <label><input type="checkbox" name="mostrar_afastamentos" checked> Mostrar Afastamentos</label>
-        </div>
-
         <button type="submit">Analisar</button>
     </form>
 
-    {% if resultado %}
-        <h3>Resultado</h3>
-        <pre>{{ resultado }}</pre>
-
-        <form method="POST" action="/exportar">
-            <input type="hidden" name="dados" value='{{ dados | tojson }}'>
-            <button type="submit">📊 Exportar Excel</button>
-        </form>
+    {% if session_id %}
+        <p>⏳ Processando arquivo...</p>
+        <a href="/resultado/{{session_id}}">Ver resultado</a>
     {% endif %}
-</div>
 
+</div>
 </body>
 </html>
 """
 
-def analisar_pdf(file):
+RESULTADO_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Resultado</title>
+</head>
+<body style="font-family: Arial; text-align:center; background:#f4f4f4">
+
+<div style="background:white; padding:20px; margin:40px auto; width:700px; border-radius:10px;">
+
+<h2>Resultado</h2>
+
+{% if pronto %}
+    <pre>{{ resultado }}</pre>
+
+    <form method="POST" action="/exportar/{{session_id}}">
+        <button type="submit">📊 Exportar Excel</button>
+    </form>
+{% else %}
+    <p>⏳ Ainda processando... atualize a página</p>
+{% endif %}
+
+</div>
+</body>
+</html>
+"""
+
+# 🔥 NOVO ANALISADOR (super rápido)
+def analisar_pdf_bytes(file_bytes):
     dados = {}
     associado_atual = None
 
-    with pdfplumber.open(file) as pdf:
-        for pagina in pdf.pages:
-            texto = pagina.extract_text()
-            linhas = texto.split("\n")
+    doc = fitz.open(stream=file_bytes, filetype="pdf")
 
-            for linha in linhas:
-                linha_lower = linha.lower()
+    for page in doc:
+        texto = page.get_text()
 
-                if linha.strip().startswith("Associado"):
-                    partes = linha.split(":")
-                    if len(partes) > 1:
-                        nome_limpo = partes[1].split("Categoria")[0].strip()
-                        associado_atual = nome_limpo
+        if not texto:
+            continue
+
+        linhas = texto.split("\n")
+
+        for linha in linhas:
+            linha_lower = linha.lower()
+
+            if linha.strip().startswith("Associado"):
+                partes = linha.split(":")
+                if len(partes) > 1:
+                    nome = partes[1].split("Categoria")[0].strip()
+                    associado_atual = nome
+
+                    if associado_atual not in dados:
                         dados[associado_atual] = {
                             "faltas": set(),
                             "afastamentos": set()
                         }
 
-                if not associado_atual:
-                    continue
+            if not associado_atual:
+                continue
 
-                data_match = re.search(r"\d{2}/\d{2}/\d{2}", linha)
-                if not data_match:
-                    continue
+            data_match = re.search(r"\d{2}/\d{2}/\d{2}", linha)
+            if not data_match:
+                continue
 
-                data = data_match.group()
+            data = data_match.group()
 
-                if "afast doenca" in linha_lower:
-                    dados[associado_atual]["afastamentos"].add(data)
+            if "afast doenca" in linha_lower:
+                dados[associado_atual]["afastamentos"].add(data)
 
-                if "falta" in linha_lower and "falta injustificada" in linha_lower:
-                    dados[associado_atual]["faltas"].add(data)
+            if "falta injustificada" in linha_lower:
+                dados[associado_atual]["faltas"].add(data)
 
     for nome in dados:
         dados[nome]["faltas"] = list(dados[nome]["faltas"])
@@ -98,50 +117,83 @@ def analisar_pdf(file):
     return dados
 
 
+# 🔄 processamento em background
+def processar_background(file_bytes, session_id):
+    dados = analisar_pdf_bytes(file_bytes)
+
+    resultado = ""
+
+    for nome, info in dados.items():
+        faltas = info["faltas"]
+        afast = info["afastamentos"]
+
+        if not faltas and not afast:
+            continue
+
+        resultado += f"👤 {nome}\n\n"
+
+        resultado += f"❌ Faltas: {len(faltas)}\n"
+        for d in sorted(faltas):
+            resultado += f"• {d}\n"
+
+        resultado += f"\n🏥 Afastamentos: {len(afast)}\n"
+        for d in sorted(afast):
+            resultado += f"• {d}\n"
+
+        resultado += "\n" + "-"*40 + "\n\n"
+
+    resultados[session_id] = {
+        "pronto": True,
+        "texto": resultado,
+        "dados": dados
+    }
+
+
 @app.route("/", methods=["GET", "POST"])
 def home():
-    resultado = None
-    dados = {}
-
     if request.method == "POST":
         file = request.files["file"]
 
-        mostrar_faltas = request.form.get("mostrar_faltas")
-        mostrar_afastamentos = request.form.get("mostrar_afastamentos")
-
         if file:
-            dados = analisar_pdf(file)
+            session_id = str(uuid.uuid4())
 
-            resultado = ""
+            file_bytes = file.read()
 
-            for nome, info in dados.items():
+            resultados[session_id] = {"pronto": False}
 
-                faltas = info["faltas"] if mostrar_faltas else []
-                afast = info["afastamentos"] if mostrar_afastamentos else []
+            threading.Thread(
+                target=processar_background,
+                args=(file_bytes, session_id)
+            ).start()
 
-                if not faltas and not afast:
-                    continue
+            return render_template_string(HTML, session_id=session_id)
 
-                resultado += f"👤 {nome}\n\n"
-
-                if mostrar_faltas:
-                    resultado += f"❌ Faltas: {len(faltas)}\n"
-                    for d in sorted(faltas):
-                        resultado += f"• {d}\n"
-
-                if mostrar_afastamentos:
-                    resultado += f"\n🏥 Afastamentos: {len(afast)}\n"
-                    for d in sorted(afast):
-                        resultado += f"• {d}\n"
-
-                resultado += "\n" + "-"*40 + "\n\n"
-
-    return render_template_string(HTML, resultado=resultado, dados=dados)
+    return render_template_string(HTML)
 
 
-@app.route("/exportar", methods=["POST"])
-def exportar():
-    dados = json.loads(request.form["dados"])
+@app.route("/resultado/<session_id>")
+def resultado(session_id):
+    info = resultados.get(session_id)
+
+    if not info:
+        return "Sessão não encontrada"
+
+    return render_template_string(
+        RESULTADO_HTML,
+        pronto=info["pronto"],
+        resultado=info.get("texto", ""),
+        session_id=session_id
+    )
+
+
+@app.route("/exportar/<session_id>", methods=["POST"])
+def exportar(session_id):
+    info = resultados.get(session_id)
+
+    if not info or not info["pronto"]:
+        return "Ainda processando"
+
+    dados = info["dados"]
 
     output = BytesIO()
     lista = []
@@ -163,10 +215,5 @@ def exportar():
     return send_file(output, download_name="relatorio.xlsx", as_attachment=True)
 
 
-def abrir_navegador():
-    webbrowser.open("http://127.0.0.1:5000")
-
-
 if __name__ == "__main__":
-    threading.Timer(1, abrir_navegador).start()
     app.run(debug=False)
