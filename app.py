@@ -16,53 +16,83 @@ HTML = """
     <title>Controle de Ponto</title>
     <style>
         body {
-            font-family: Arial;
-            background: linear-gradient(120deg, #4facfe, #00f2fe);
-            text-align: center;
-            padding: 30px;
+            font-family: 'Segoe UI', Tahoma;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
         }
 
-        .card {
+        .container {
             background: white;
             padding: 30px;
-            border-radius: 12px;
-            width: 420px;
-            margin: auto;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            border-radius: 16px;
+            width: 450px;
+            box-shadow: 0 15px 40px rgba(0,0,0,0.2);
+            text-align: center;
+        }
+
+        h2 {
+            margin-bottom: 20px;
+        }
+
+        input[type="file"] {
+            margin-bottom: 15px;
+        }
+
+        .filters {
+            margin-bottom: 15px;
         }
 
         button {
-            background: #4facfe;
-            border: none;
-            padding: 10px 20px;
+            background: #667eea;
             color: white;
-            border-radius: 6px;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
             cursor: pointer;
+            font-size: 14px;
+        }
+
+        button:hover {
+            background: #5a67d8;
+        }
+
+        #status {
+            margin-top: 15px;
+            font-weight: bold;
         }
 
         .resultado {
             margin-top: 20px;
             text-align: left;
             white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+            border-top: 1px solid #eee;
+            padding-top: 10px;
         }
     </style>
 </head>
 <body>
 
-<div class="card">
+<div class="container">
     <h2>📊 Controle de Ponto</h2>
 
     <form id="form">
-        <input type="file" name="file" required><br><br>
+        <input type="file" name="file" required><br>
 
-        <label><input type="checkbox" id="faltas" checked> Faltas</label>
-        <label><input type="checkbox" id="afast" checked> Afastamentos</label>
+        <div class="filters">
+            <label><input type="checkbox" id="faltas" checked> Faltas</label>
+            <label><input type="checkbox" id="afast" checked> Afastamentos</label>
+        </div>
 
-        <br><br>
-        <button type="submit">Analisar</button>
+        <button type="submit">Analisar PDF</button>
     </form>
 
-    <p id="status"></p>
+    <div id="status"></div>
     <div class="resultado" id="resultado"></div>
 </div>
 
@@ -124,7 +154,7 @@ def analisar_pdf(filepath):
         for pagina in pdf.pages:
             texto = pagina.extract_text() or ""
 
-            for linha in texto.split("\n"):
+            for linha in texto.split("\\n"):
                 linha_lower = linha.lower()
 
                 if "associado" in linha_lower:
@@ -139,7 +169,7 @@ def analisar_pdf(filepath):
                 if not associado_atual:
                     continue
 
-                data_match = re.search(r"\d{2}/\d{2}/\d{2}", linha)
+                data_match = re.search(r"\\d{2}/\\d{2}/\\d{2}", linha)
                 if not data_match:
                     continue
 
