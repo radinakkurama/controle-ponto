@@ -1,173 +1,172 @@
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, render_template_string, send_file
 import pdfplumber
 import re
-import uuid
-import os
+import pandas as pd
+from io import BytesIO
+import json
+import webbrowser
+import threading
 
 app = Flask(__name__)
-
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 HTML = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Controle de Ponto</title>
+    <title>CONTROLE DE PONTO</title>
+    <style>
+        body { font-family: Arial; background: #f4f4f4; text-align: center; }
+        .box { background: white; padding: 20px; margin: 40px auto; width: 700px; border-radius: 10px; box-shadow: 0px 0px 10px #ccc; }
+        button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        pre { text-align: left; background: #eee; padding: 10px; border-radius: 5px; }
+        .filtros { margin: 10px; }
+    </style>
 </head>
-<body style="font-family: Arial; text-align:center;">
+<body>
 
-<h2>📊 Controle de Ponto</h2>
+<div class="box">
+    <h2>📄 CONTROLE DE PONTO</h2>
 
-<form id="form">
-    <input type="file" name="file" required><br><br>
+    <form method="POST" enctype="multipart/form-data">
+        <input type="file" name="file"><br><br>
 
-    <label><input type="checkbox" id="faltas" checked> Faltas</label>
-    <label><input type="checkbox" id="afast" checked> Afastamentos</label>
+        <div class="filtros">
+            <label><input type="checkbox" name="mostrar_faltas" checked> Mostrar Faltas</label><br>
+            <label><input type="checkbox" name="mostrar_afastamentos" checked> Mostrar Afastamentos</label>
+        </div>
 
-    <br><br>
-    <button type="submit">Analisar</button>
-</form>
+        <button type="submit">Analisar</button>
+    </form>
 
-<p id="status"></p>
-<pre id="resultado" style="text-align:left; margin:20px;"></pre>
+    {% if resultado %}
+        <h3>Resultado</h3>
+        <pre>{{ resultado }}</pre>
 
-<script>
-document.getElementById("form").onsubmit = async function(e){
-    e.preventDefault();
-
-    let formData = new FormData(this);
-
-    document.getElementById("status").innerText = "⏳ Processando...";
-    document.getElementById("resultado").innerText = "";
-
-    let res = await fetch("/upload", { method:"POST", body: formData });
-    let d = await res.json();
-
-    if(d.status === "done"){
-        document.getElementById("status").innerText = "✅ Concluído";
-
-        let mostrarFaltas = document.getElementById("faltas").checked;
-        let mostrarAfast = document.getElementById("afast").checked;
-
-        let texto = "";
-
-        d.dados.forEach(p => {
-
-            if (!p.faltas.length && !p.afastamentos.length) return;
-
-            texto += "👤 " + p.nome + "\\n\\n";
-
-            if (mostrarFaltas){
-                texto += "❌ Faltas: " + p.faltas.length + "\\n";
-                p.faltas.forEach(f => texto += "• " + f + "\\n");
-            }
-
-            if (mostrarAfast){
-                texto += "\\n🏥 Afastamentos: " + p.afastamentos.length + "\\n";
-                p.afastamentos.forEach(a => texto += "• " + a + "\\n");
-            }
-
-            texto += "\\n------------------------\\n\\n";
-        });
-
-        document.getElementById("resultado").innerText = texto;
-    } else {
-        document.getElementById("status").innerText = "❌ Erro: " + d.erro;
-    }
-}
-</script>
+        <form method="POST" action="/exportar">
+            <input type="hidden" name="dados" value='{{ dados | tojson }}'>
+            <button type="submit">📊 Exportar Excel</button>
+        </form>
+    {% endif %}
+</div>
 
 </body>
 </html>
 """
 
-def analisar_pdf(filepath):
+def analisar_pdf(file):
     dados = {}
     associado_atual = None
 
-    with pdfplumber.open(filepath) as pdf:
+    with pdfplumber.open(file) as pdf:
         for pagina in pdf.pages:
-            texto = pagina.extract_text() or ""
+            texto = pagina.extract_text()
+            linhas = texto.split("\n")
 
-            for linha in texto.split("\\n"):
+            for linha in linhas:
                 linha_lower = linha.lower()
 
-                # 👤 PEGA NOME (AJUSTE PRINCIPAL)
-                if "associado" in linha_lower:
+                if linha.strip().startswith("Associado"):
                     partes = linha.split(":")
                     if len(partes) > 1:
-                        nome = partes[1].strip()
-
-                        # limpa sujeira
-                        nome = nome.replace("Categoria de Ponto", "").strip()
-
-                        associado_atual = nome
-
-                        if nome not in dados:
-                            dados[nome] = {"faltas": [], "afastamentos": []}
+                        nome_limpo = partes[1].split("Categoria")[0].strip()
+                        associado_atual = nome_limpo
+                        dados[associado_atual] = {
+                            "faltas": set(),
+                            "afastamentos": set()
+                        }
 
                 if not associado_atual:
                     continue
 
-                # 📅 DATA
-                data_match = re.search(r"\\d{2}/\\d{2}/\\d{2}", linha)
+                data_match = re.search(r"\d{2}/\d{2}/\d{2}", linha)
                 if not data_match:
                     continue
 
                 data = data_match.group()
 
-                # 🔥 PADRÃO ORIGINAL (FUNCIONA)
-                if "falta injustificada" in linha_lower:
-                    if data not in dados[associado_atual]["faltas"]:
-                        dados[associado_atual]["faltas"].append(data)
-
                 if "afast doenca" in linha_lower:
-                    if data not in dados[associado_atual]["afastamentos"]:
-                        dados[associado_atual]["afastamentos"].append(data)
+                    dados[associado_atual]["afastamentos"].add(data)
 
-    resultado = []
+                if "falta" in linha_lower and "falta injustificada" in linha_lower:
+                    dados[associado_atual]["faltas"].add(data)
+
+    for nome in dados:
+        dados[nome]["faltas"] = list(dados[nome]["faltas"])
+        dados[nome]["afastamentos"] = list(dados[nome]["afastamentos"])
+
+    return dados
+
+
+@app.route("/", methods=["GET", "POST"])
+def home():
+    resultado = None
+    dados = {}
+
+    if request.method == "POST":
+        file = request.files["file"]
+
+        mostrar_faltas = request.form.get("mostrar_faltas")
+        mostrar_afastamentos = request.form.get("mostrar_afastamentos")
+
+        if file:
+            dados = analisar_pdf(file)
+
+            resultado = ""
+
+            for nome, info in dados.items():
+
+                faltas = info["faltas"] if mostrar_faltas else []
+                afast = info["afastamentos"] if mostrar_afastamentos else []
+
+                if not faltas and not afast:
+                    continue
+
+                resultado += f"👤 {nome}\n\n"
+
+                if mostrar_faltas:
+                    resultado += f"❌ Faltas: {len(faltas)}\n"
+                    for d in sorted(faltas):
+                        resultado += f"• {d}\n"
+
+                if mostrar_afastamentos:
+                    resultado += f"\n🏥 Afastamentos: {len(afast)}\n"
+                    for d in sorted(afast):
+                        resultado += f"• {d}\n"
+
+                resultado += "\n" + "-"*40 + "\n\n"
+
+    return render_template_string(HTML, resultado=resultado, dados=dados)
+
+
+@app.route("/exportar", methods=["POST"])
+def exportar():
+    dados = json.loads(request.form["dados"])
+
+    output = BytesIO()
+    lista = []
 
     for nome, info in dados.items():
-        if not info["faltas"] and not info["afastamentos"]:
-            continue
+        for d in info["faltas"]:
+            lista.append([nome, "Falta Injustificada", d])
 
-        resultado.append({
-            "nome": nome,
-            "faltas": info["faltas"],
-            "afastamentos": info["afastamentos"]
-        })
+        for d in info["afastamentos"]:
+            lista.append([nome, "Afastamento", d])
 
-    return resultado
+    df = pd.DataFrame(lista, columns=["Associado", "Tipo", "Data"])
+
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False)
+
+    output.seek(0)
+
+    return send_file(output, download_name="relatorio.xlsx", as_attachment=True)
 
 
-@app.route("/")
-def home():
-    return render_template_string(HTML)
-
-
-@app.route("/upload", methods=["POST"])
-def upload():
-    file = request.files["file"]
-
-    filepath = os.path.join(UPLOAD_FOLDER, f"{uuid.uuid4()}.pdf")
-    file.save(filepath)
-
-    try:
-        resultado = analisar_pdf(filepath)
-
-        return jsonify({
-            "status": "done",
-            "dados": resultado
-        })
-
-    except Exception as e:
-        return jsonify({
-            "status": "erro",
-            "erro": str(e)
-        })
+def abrir_navegador():
+    webbrowser.open("http://127.0.0.1:5000")
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    threading.Timer(1, abrir_navegador).start()
+    app.run(debug=False)
