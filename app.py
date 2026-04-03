@@ -4,8 +4,7 @@ import re
 import pandas as pd
 from io import BytesIO
 import json
-import webbrowser
-import threading
+import os
 
 app = Flask(__name__)
 
@@ -13,29 +12,22 @@ HTML = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>CONTROLE DE PONTO</title>
+    <title>Controle de Ponto</title>
     <style>
         body { font-family: Arial; background: #f4f4f4; text-align: center; }
         .box { background: white; padding: 20px; margin: 40px auto; width: 700px; border-radius: 10px; box-shadow: 0px 0px 10px #ccc; }
         button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
         button:hover { background: #0056b3; }
         pre { text-align: left; background: #eee; padding: 10px; border-radius: 5px; }
-        .filtros { margin: 10px; }
     </style>
 </head>
 <body>
 
 <div class="box">
-    <h2>📄 CONTROLE DE PONTO</h2>
+    <h2>📊 Controle de Ponto</h2>
 
     <form method="POST" enctype="multipart/form-data">
         <input type="file" name="file"><br><br>
-
-        <div class="filtros">
-            <label><input type="checkbox" name="mostrar_faltas" checked> Mostrar Faltas</label><br>
-            <label><input type="checkbox" name="mostrar_afastamentos" checked> Mostrar Afastamentos</label>
-        </div>
-
         <button type="submit">Analisar</button>
     </form>
 
@@ -61,6 +53,9 @@ def analisar_pdf(file):
     with pdfplumber.open(file) as pdf:
         for pagina in pdf.pages:
             texto = pagina.extract_text()
+            if not texto:
+                continue
+
             linhas = texto.split("\n")
 
             for linha in linhas:
@@ -88,7 +83,7 @@ def analisar_pdf(file):
                 if "afast doenca" in linha_lower:
                     dados[associado_atual]["afastamentos"].add(data)
 
-                if "falta" in linha_lower and "falta injustificada" in linha_lower:
+                if "falta injustificada" in linha_lower:
                     dados[associado_atual]["faltas"].add(data)
 
     for nome in dados:
@@ -104,37 +99,37 @@ def home():
     dados = {}
 
     if request.method == "POST":
-        file = request.files["file"]
+        try:
+            if "file" not in request.files:
+                return "Erro: nenhum arquivo enviado"
 
-        mostrar_faltas = request.form.get("mostrar_faltas")
-        mostrar_afastamentos = request.form.get("mostrar_afastamentos")
+            file = request.files["file"]
 
-        if file:
+            if file.filename == "":
+                return "Erro: selecione um PDF"
+
             dados = analisar_pdf(file)
 
             resultado = ""
 
             for nome, info in dados.items():
-
-                faltas = info["faltas"] if mostrar_faltas else []
-                afast = info["afastamentos"] if mostrar_afastamentos else []
-
-                if not faltas and not afast:
+                if not info["faltas"] and not info["afastamentos"]:
                     continue
 
                 resultado += f"👤 {nome}\n\n"
 
-                if mostrar_faltas:
-                    resultado += f"❌ Faltas: {len(faltas)}\n"
-                    for d in sorted(faltas):
-                        resultado += f"• {d}\n"
+                resultado += f"❌ Faltas: {len(info['faltas'])}\n"
+                for d in sorted(info["faltas"]):
+                    resultado += f"• {d}\n"
 
-                if mostrar_afastamentos:
-                    resultado += f"\n🏥 Afastamentos: {len(afast)}\n"
-                    for d in sorted(afast):
-                        resultado += f"• {d}\n"
+                resultado += f"\n🏥 Afastamentos: {len(info['afastamentos'])}\n"
+                for d in sorted(info["afastamentos"]):
+                    resultado += f"• {d}\n"
 
                 resultado += "\n" + "-"*40 + "\n\n"
+
+        except Exception as e:
+            return f"Erro ao processar o PDF: {str(e)}"
 
     return render_template_string(HTML, resultado=resultado, dados=dados)
 
@@ -163,10 +158,6 @@ def exportar():
     return send_file(output, download_name="relatorio.xlsx", as_attachment=True)
 
 
-def abrir_navegador():
-    webbrowser.open("http://127.0.0.1:5000")
-
-
 if __name__ == "__main__":
-    threading.Timer(1, abrir_navegador).start()
-    app.run(debug=False)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
