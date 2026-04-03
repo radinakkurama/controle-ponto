@@ -14,87 +14,23 @@ HTML = """
 <html>
 <head>
     <title>Controle de Ponto</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-        }
-
-        .container {
-            background: white;
-            padding: 30px;
-            border-radius: 16px;
-            width: 450px;
-            box-shadow: 0 15px 40px rgba(0,0,0,0.2);
-            text-align: center;
-        }
-
-        h2 {
-            margin-bottom: 20px;
-        }
-
-        input[type="file"] {
-            margin-bottom: 15px;
-        }
-
-        .filters {
-            margin-bottom: 15px;
-        }
-
-        button {
-            background: #667eea;
-            color: white;
-            border: none;
-            padding: 12px 20px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        button:hover {
-            background: #5a67d8;
-        }
-
-        #status {
-            margin-top: 15px;
-            font-weight: bold;
-        }
-
-        .resultado {
-            margin-top: 20px;
-            text-align: left;
-            white-space: pre-wrap;
-            max-height: 300px;
-            overflow-y: auto;
-            border-top: 1px solid #eee;
-            padding-top: 10px;
-        }
-    </style>
 </head>
-<body>
+<body style="font-family: Arial; text-align:center;">
 
-<div class="container">
-    <h2>📊 Controle de Ponto</h2>
+<h2>📊 Controle de Ponto</h2>
 
-    <form id="form">
-        <input type="file" name="file" required><br>
+<form id="form">
+    <input type="file" name="file" required><br><br>
 
-        <div class="filters">
-            <label><input type="checkbox" id="faltas" checked> Faltas</label>
-            <label><input type="checkbox" id="afast" checked> Afastamentos</label>
-        </div>
+    <label><input type="checkbox" id="faltas" checked> Faltas</label>
+    <label><input type="checkbox" id="afast" checked> Afastamentos</label>
 
-        <button type="submit">Analisar PDF</button>
-    </form>
+    <br><br>
+    <button type="submit">Analisar</button>
+</form>
 
-    <div id="status"></div>
-    <div class="resultado" id="resultado"></div>
-</div>
+<p id="status"></p>
+<pre id="resultado" style="text-align:left; margin:20px;"></pre>
 
 <script>
 document.getElementById("form").onsubmit = async function(e){
