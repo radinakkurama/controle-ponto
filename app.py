@@ -56,8 +56,6 @@ RESULTADO_HTML = """
 <h2>Resultado</h2>
 
 {% if pronto %}
-    <p style="color:green;"><strong>✅ Processamento concluído!</strong></p>
-
     <pre>{{ resultado }}</pre>
 
     <form method="POST" action="/exportar/{{session_id}}">
@@ -84,7 +82,7 @@ def analisar_pdf_bytes(file_bytes):
         if not texto:
             continue
 
-        linhas = texto.split("\\n")
+        linhas = texto.split("\n")
 
         for linha in linhas:
             linha_lower = linha.lower()
@@ -104,7 +102,7 @@ def analisar_pdf_bytes(file_bytes):
             if not associado_atual:
                 continue
 
-            data_match = re.search(r"\\d{2}/\\d{2}/\\d{2}", linha)
+            data_match = re.search(r"\d{2}/\d{2}/\d{2}", linha)
             if not data_match:
                 continue
 
@@ -139,29 +137,24 @@ def processar_background(file_bytes, session_id):
         if not faltas and not afast:
             continue
 
-        resultado += f"👤 {nome}\\n\\n"
+        resultado += f"👤 {nome}\n\n"
 
         if mostrar_faltas:
-            resultado += f"❌ Faltas: {len(faltas)}\\n"
+            resultado += f"❌ Faltas: {len(faltas)}\n"
             for d in sorted(faltas):
-                resultado += f"• {d}\\n"
+                resultado += f"• {d}\n"
 
         if mostrar_afast:
-            resultado += f"\\n🏥 Afastamentos: {len(afast)}\\n"
+            resultado += f"\n🏥 Afastamentos: {len(afast)}\n"
             for d in sorted(afast):
-                resultado += f"• {d}\\n"
+                resultado += f"• {d}\n"
 
-        resultado += "\\n" + "-"*40 + "\\n\\n"
-
-    # 🔥 CORREÇÃO AQUI (mantém filtros)
-    config_antiga = resultados.get(session_id, {})
+        resultado += "\n" + "-"*40 + "\n\n"
 
     resultados[session_id] = {
         "pronto": True,
         "texto": resultado,
-        "dados": dados,
-        "mostrar_faltas": config_antiga.get("mostrar_faltas", True),
-        "mostrar_afastamentos": config_antiga.get("mostrar_afastamentos", True)
+        "dados": dados
     }
 
 
