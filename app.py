@@ -153,10 +153,15 @@ def processar_background(file_bytes, session_id):
 
         resultado += "\\n" + "-"*40 + "\\n\\n"
 
+    # 🔥 CORREÇÃO AQUI (mantém filtros)
+    config_antiga = resultados.get(session_id, {})
+
     resultados[session_id] = {
         "pronto": True,
         "texto": resultado,
-        "dados": dados
+        "dados": dados,
+        "mostrar_faltas": config_antiga.get("mostrar_faltas", True),
+        "mostrar_afastamentos": config_antiga.get("mostrar_afastamentos", True)
     }
 
 
