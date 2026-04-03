@@ -130,6 +130,9 @@ def processar_background(file_bytes, session_id):
 
     resultado = ""
 
+    total_faltas = 0
+    total_afast = 0
+
     for nome, info in dados.items():
         faltas = info["faltas"] if mostrar_faltas else []
         afast = info["afastamentos"] if mostrar_afast else []
@@ -143,13 +146,22 @@ def processar_background(file_bytes, session_id):
             resultado += f"❌ Faltas: {len(faltas)}\n"
             for d in sorted(faltas):
                 resultado += f"• {d}\n"
+            total_faltas += len(faltas)
 
         if mostrar_afast:
             resultado += f"\n🏥 Afastamentos: {len(afast)}\n"
             for d in sorted(afast):
                 resultado += f"• {d}\n"
+            total_afast += len(afast)
 
         resultado += "\n" + "-"*40 + "\n\n"
+
+    # RESUMO FINAL
+    resultado += "\n" + "="*30 + "\n"
+    resultado += "📊 RESUMO GERAL\n\n"
+    resultado += f"❌ Total de faltas: {total_faltas}\n"
+    resultado += f"🏥 Total de afastamentos: {total_afast}\n"
+    resultado += "="*30 + "\n"
 
     resultados[session_id] = {
         "pronto": True,
